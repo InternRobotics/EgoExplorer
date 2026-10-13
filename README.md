@@ -10,7 +10,7 @@
 <a href="#"><img alt="Paper" src="https://img.shields.io/badge/Paper-coming%20soon-b31b1b?style=flat-square"/></a>
 <a href="#"><img alt="Project page" src="https://img.shields.io/badge/Project-page-0b0d10?style=flat-square"/></a>
 <a href="https://huggingface.co/datasets/InternRobotics/EgoExplorer"><img alt="Dataset" src="https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-Hugging%20Face-ffcc4d?style=flat-square"/></a>
-<a href="#release-plan"><img alt="Toolkit release" src="https://img.shields.io/badge/Toolkit-Oct%2030%2C%202026-2b6cb0?style=flat-square"/></a>
+<a href="#release-plan"><img alt="Toolkit release" src="https://img.shields.io/badge/Toolkit-early%20Nov%202026-2b6cb0?style=flat-square"/></a>
 </p>
 
 <b>The capture-and-reconstruction toolkit behind EgoExplorer:<br/>
@@ -19,7 +19,7 @@ five body trackers, two gloves and a head camera in — metric SMPL-X, hands, to
 </div>
 
 > [!NOTE]
-> **The toolkit code is being cleaned up and is expected on October 30, 2026.** This page describes what it does and how the pipeline is put together. Watch or star the repository to be notified. The data produced with it is already available on [Hugging Face](https://huggingface.co/datasets/InternRobotics/EgoExplorer).
+> **The toolkit code is being cleaned up and is expected in early November 2026.** This page describes what it does and how the pipeline is put together. Watch or star the repository to be notified. The data produced with it is already available on [Hugging Face](https://huggingface.co/datasets/InternRobotics/EgoExplorer).
 
 ## Why a toolkit
 
@@ -151,7 +151,7 @@ Because the rig carries no room-side infrastructure, each capture space can be r
 ## Release plan
 
 - [x] Dataset preview on [Hugging Face](https://huggingface.co/datasets/InternRobotics/EgoExplorer)
-- [ ] **Toolkit code — expected October 30, 2026**
+- [ ] **Toolkit code — expected early November 2026**
   - [ ] Stream synchronisation and sanity checks
   - [ ] C³ reconstruction: calibration, five-anchor motion prior, constrained refinement
   - [ ] Glove retargeting and tactile processing
