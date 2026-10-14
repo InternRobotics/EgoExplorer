@@ -156,7 +156,7 @@ Because the rig carries no room-side infrastructure, each capture space can be r
   - [ ] C³ reconstruction: calibration, five-anchor motion prior, constrained refinement
   - [ ] Glove retargeting and tactile processing
   - [ ] 30 Hz export, LeRobot conversion and review viewer
-- [ ] Paper
+- [x] Paper ([arXiv 2610.18872](https://arxiv.org/abs/2610.18872))
 
 ## Citation
 
