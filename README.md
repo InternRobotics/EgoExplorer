@@ -7,8 +7,8 @@
 <h3>A Vision–Motion–Touch Observatory for Human Loco-Manipulation In Situ</h3>
 
 <p>
-<a href="#"><img alt="Paper" src="https://img.shields.io/badge/Paper-coming%20soon-b31b1b?style=flat-square"/></a>
-<a href="#"><img alt="Project page" src="https://img.shields.io/badge/Project-page-0b0d10?style=flat-square"/></a>
+<a href="https://huggingface.co/papers/2610.18872"><img alt="Paper" src="https://img.shields.io/badge/Paper-2610.18872-b31b1b?style=flat-square"/></a>
+<a href="https://internrobotics.github.io/egoexplorer.github.io/"><img alt="Project page" src="https://img.shields.io/badge/Project-page-0b0d10?style=flat-square"/></a>
 <a href="https://huggingface.co/datasets/InternRobotics/EgoExplorer"><img alt="Dataset" src="https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-Hugging%20Face-ffcc4d?style=flat-square"/></a>
 <a href="#release-plan"><img alt="Toolkit release" src="https://img.shields.io/badge/Toolkit-early%20Nov%202026-2b6cb0?style=flat-square"/></a>
 </p>
@@ -163,12 +163,14 @@ Because the rig carries no room-side infrastructure, each capture space can be r
 If EgoExplorer is useful in your work, please cite:
 
 ```bibtex
-@misc{egoexplorer2026,
-  title  = {EgoExplorer: A Vision-Motion-Touch Observatory for
-            Human Loco-Manipulation In Situ},
-  author = {Anonymous authors},
-  year   = {2026},
-  note   = {Paper under double-blind review}
+@misc{zhou2026egoexplorer,
+      title={EgoExplorer: A Vision-Motion-Touch Observatory for Human Loco-Manipulation In Situ}, 
+      author={Yunsong Zhou and Xuekun Jiang and Haiqi Shen and Hangxu Liu and Chaojian Shi and Yujie Liu and Jingyuan Li and Haoran Yang and Jiafei Cao and Dongzhan Zhou and Dong Wang and Yao Mu and Chunhua Shen and Weinan Zhang},
+      year={2026},
+      eprint={2610.18872},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2610.18872}, 
 }
 ```
 
