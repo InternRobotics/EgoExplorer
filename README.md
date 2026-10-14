@@ -27,6 +27,11 @@ Humanoids are built for human spaces, and almost nothing useful in those spaces 
 
 Optical motion capture needs a studio. Egocentric video scales but leaves the body unobserved. EgoExplorer takes a third route: a light **wearable rig** of sparse sensors, and a **reconstruction pipeline** that turns those sparse measurements into a full, metric, physically plausible human. This repository is that route, end to end.
 
+<p align="center">
+<img src="assets/tasks_manus.gif" width="100%" alt="Ten egocentric clips side by side, one per task template, all recorded with MANUS Metagloves."/>
+<br/><sub>Ten task templates recorded with the rig and MANUS Metagloves, one head-camera view each: six laboratory procedures (top) and four household and industrial tasks (bottom).</sub>
+</p>
+
 ## Contents
 
 - [Pipeline at a glance](#pipeline-at-a-glance)
