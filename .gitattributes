@@ -1,3 +1,7 @@
 *.gif binary
 *.jpg binary
 *.png binary
+*.mp4 binary
+*.npz binary
+*.pt binary
+*.stl binary

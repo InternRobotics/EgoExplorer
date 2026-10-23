@@ -1,0 +1,16 @@
+# Core numerical and recording dependencies
+numpy
+opencv-python
+msgpack>=1.0
+# MP4 逐帧写入真实采集 PTS，避免掉帧时固定帧率封装造成视频加速。
+av>=14,<17
+
+# Read GoPro THM/EXIF timestamps in devices/gopro_camera.py
+Pillow
+
+# Manus 模式在 Windows 本机读取 OpenXR Tracker；Wuji Linux 端不需要它。
+pyopenxr; platform_system == "Windows"
+
+# 2026.7.21 provides the user-data bundle API used by wuji_calibration.
+# Official Wuji Python SDK currently documents Ubuntu 22+ support.
+wuji-sdk>=2026.7.21; platform_system == "Linux"

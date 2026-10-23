@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+models
+outputs/
+tactile/stats/
+.DS_Store
+capture/ManusClient/*.exe
+capture/ManusClient/*.dll
+capture/ManusClient/*.pdb
+capture/wuji_calibration/*.zip
+capture/data/
+capture/record_logs/

@@ -1,0 +1,4 @@
+# Windows-only tracker sender dependencies
+numpy
+msgpack>=1.0
+pyopenxr

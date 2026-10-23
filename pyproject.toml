@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "egoexplorer-toolkit"
+version = "1.0.0"
+description = "EgoExplorer capture-to-SMPL-X toolkit: five VIVE trackers + gloves -> calibrated SMPL-X, hands, touch on one 30 Hz clock"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "scipy>=1.10"]
+
+[project.optional-dependencies]
+fit = ["torch>=2.2", "smplx>=0.1.28"]
+review = ["pillow>=10"]
+dataset = ["pyarrow>=15,<23"]
+visualize = ["matplotlib>=3.8"]
+all = ["torch>=2.2", "smplx>=0.1.28", "pillow>=10", "pyarrow>=15,<23", "matplotlib>=3.8"]
+
+[project.scripts]
+five-tracker-smplx = "five_tracker_smplx.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

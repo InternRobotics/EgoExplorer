@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Ego 数据实时采集</title>
+<!-- 3D 库；首次打开需联网。离线：把 three.min.js(r128) 放到页面同目录并改成 ./three.min.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#141a22; --panel-2:#0f141b; --line:#26313f;
+    --ink:#d6dee8; --dim:#7d8a9c; --faint:#4b5563;
+    --accent:#a78bfa; --accent-2:#c4b5fd; --live:#ff5d5d;
+    --x:#ff5f56; --y:#7ddc7d; --z:#5aa2ff;
+    --ok:#34d399; --ok-2:#10b981; --save:#8b7bf7; --save-2:#7c6cf0;
+    --mono: ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans: ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+       display:flex;flex-direction:column;overflow:hidden}
+
+  header{display:flex;align-items:baseline;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);
+         background:linear-gradient(180deg,#121821,#0f141b)}
+  header h1{font-size:14px;font-weight:600;letter-spacing:.02em;margin:0}
+  header .sub{font-family:var(--mono);font-size:12px;color:var(--accent-2)}
+  header .spacer{flex:1}
+  header .stat{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  header .stat b{color:var(--ink);font-weight:600}
+  header .agent{font-family:var(--mono);font-size:11px;color:var(--dim);white-space:nowrap}
+  header .agent.ok{color:var(--ok)}
+  header .agent.bad{color:var(--live)}
+  header .total{font-family:var(--mono);font-size:12px;color:var(--dim);white-space:nowrap}
+  header .total b{color:var(--ok);font-size:13px}
+
+  /* 布局：相机放大(左侧跨两行)，tracker/手部缩小(右侧上下) */
+  main{flex:1;display:grid;gap:10px;padding:10px;min-height:0;
+       grid-template-columns:1.5fr 1fr;grid-template-rows:minmax(0,1.25fr) minmax(0,1fr);
+       grid-template-areas:"video trackers" "video gloves";}
+  main.with-tactile{grid-template-columns:minmax(0,1.35fr) minmax(520px,1fr);
+       grid-template-rows:minmax(260px,.85fr) minmax(540px,1.7fr);
+       grid-template-areas:"video trackers" "video gloves";overflow:auto}
+  .panel{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+         overflow:hidden;min-height:0;min-width:0}
+  #panel-video{grid-area:video;background:#000;display:flex;align-items:center;justify-content:center}
+  #panel-trackers{grid-area:trackers}
+  #panel-gloves{grid-area:gloves;padding:0}
+  .glove-panel-tag{display:none}
+  .glove-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;height:100%;min-height:0}
+  .glove-pair{min-width:0;min-height:0}
+  #panel-gloves .hand{position:relative;width:100%;height:100%;min-width:0;min-height:0;
+        background:var(--panel);border-radius:8px;overflow:hidden}
+  .tactile-hand{display:none;grid-template-rows:auto minmax(0,1fr);gap:6px;min-width:0;min-height:0;
+                padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2)}
+  main.with-tactile #panel-gloves{padding:34px 10px 10px}
+  main.with-tactile .glove-panel-tag{display:block}
+  main.with-tactile .glove-grid{grid-template-columns:1fr;grid-template-rows:repeat(2,minmax(240px,1fr));gap:10px}
+  main.with-tactile .glove-pair{display:grid;grid-template-columns:minmax(190px,.8fr) minmax(280px,1.2fr);
+                               gap:10px}
+  main.with-tactile .hand{border:1px solid var(--line);background:var(--panel-2)}
+  main.with-tactile .tactile-hand{display:grid}
+  .tactile-head{display:flex;align-items:center;gap:10px;font:11px var(--mono);color:var(--dim)}
+  .tactile-head b{color:var(--accent-2);font-weight:600}
+  .tactile-head .tactile-stats{margin-left:auto;white-space:nowrap}
+  .tactile-canvas-wrap{position:relative;min-width:0;min-height:0;height:100%;width:auto;max-width:100%;
+                       aspect-ratio:31 / 24;justify-self:center;display:flex;align-items:center;
+                       justify-content:center;overflow:hidden;border-radius:6px;background:#0a0e14}
+  .panel .tactile-canvas{width:100%;height:100%;image-rendering:pixelated}
+  .tactile-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+                 color:var(--dim);font:11px var(--mono);pointer-events:none}
+  .tactile-scale{position:absolute;right:8px;bottom:7px;display:flex;align-items:center;gap:6px;
+                 color:#d6dee8;font:9px var(--mono);text-shadow:0 1px 2px #000;pointer-events:none}
+  .tactile-scale i{display:block;width:90px;height:7px;border-radius:4px;
+                    background:linear-gradient(90deg,#102641,#0969a8,#13c8a3,#f6d743,#f04438)}
+
+  .panel .tag{position:absolute;top:8px;left:10px;z-index:5;font-family:var(--mono);font-size:11px;
+              letter-spacing:.04em;color:var(--dim);text-transform:uppercase;pointer-events:none}
+  .panel .tag b{color:var(--accent-2);font-weight:600}
+  .panel canvas{display:block;width:100%;height:100%}
+
+  /* 相机直播 */
+  #cam{max-width:100%;max-height:100%;display:block;background:#000}
+  #cam.hidden{display:none}
+  .novideo{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
+           gap:6px;color:var(--dim);font-family:var(--mono);font-size:12px;text-align:center;padding:24px;line-height:1.7}
+  .novideo .big{color:var(--ink);font-size:13px}
+  .camera-tools{position:absolute;top:8px;right:10px;z-index:8;display:flex;align-items:center;gap:8px;
+                font:11px var(--mono)}
+  .camera-state{display:flex;align-items:center;gap:6px;color:var(--dim);background:rgba(10,14,20,.82);
+                border:1px solid var(--line);border-radius:16px;padding:5px 9px;backdrop-filter:blur(3px)}
+  .camera-light{width:9px;height:9px;border-radius:50%;background:var(--live);flex:none;
+                box-shadow:0 0 8px rgba(255,93,93,.65);transition:background .2s,box-shadow .2s}
+  .camera-light.online{background:var(--ok);box-shadow:0 0 8px rgba(52,211,153,.75)}
+  .camera-toggle{border:1px solid var(--line);border-radius:7px;background:rgba(20,26,34,.9);
+                 color:var(--ink);font:11px var(--mono);padding:5px 10px;cursor:pointer;
+                 transition:border-color .15s,background .15s,color .15s}
+  .camera-toggle:hover{border-color:var(--accent);background:rgba(38,49,63,.94)}
+  .camera-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .cam-rec{position:absolute;top:43px;right:12px;z-index:6;display:none;align-items:center;gap:7px;
+           font-family:var(--mono);font-size:12px;color:#fff;background:rgba(180,30,30,.72);
+           padding:3px 9px;border-radius:20px}
+  .cam-rec .d{width:9px;height:9px;border-radius:50%;background:#fff;animation:blink 1s steps(2,start) infinite}
+  @keyframes blink{50%{opacity:.25}}
+
+  /* 图例 / 读数 */
+  .legend{position:absolute;z-index:5;font-family:var(--mono);font-size:11px;line-height:1.5;
+          background:rgba(10,14,20,.72);border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+          backdrop-filter:blur(3px)}
+  #tracker-legend{top:8px;right:10px;max-width:52%;max-height:calc(100% - 16px);overflow:auto}
+  #tracker-legend .row{display:flex;gap:8px;white-space:nowrap;align-items:center}
+  #tracker-legend .name{color:var(--ink);min-width:88px}
+  #tracker-legend .xyz{color:var(--dim)}
+  #tracker-legend .xyz .off{color:var(--faint)}
+  #axis-legend{bottom:8px;left:10px;color:var(--dim);display:flex;gap:12px}
+  #axis-legend .ax{display:flex;gap:5px;align-items:center}
+  #axis-legend i{width:14px;height:2px;display:inline-block;border-radius:2px}
+  .hand .hlabel{position:absolute;top:6px;left:8px;z-index:5;font-family:var(--mono);font-size:10px;
+                letter-spacing:.04em;color:var(--dim);text-transform:uppercase;pointer-events:none}
+  .hand .hlabel b{color:var(--accent-2)}
+  .empty-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+              color:var(--dim);font-family:var(--mono);font-size:11px;text-align:center;padding:16px}
+
+  /* ============ 底部录制控制条（醒目大按钮） ============ */
+  .transport{display:flex;align-items:center;gap:14px;padding:12px 16px;border-top:1px solid var(--line);
+             background:linear-gradient(0deg,#121821,#0f141b)}
+  .rec-btn{border:none;border-radius:10px;cursor:pointer;font-family:var(--sans);
+           font-size:16px;font-weight:700;letter-spacing:.02em;color:#fff;
+           padding:14px 26px;display:inline-flex;align-items:center;gap:9px;
+           transition:transform .05s,box-shadow .15s,filter .15s;box-shadow:0 2px 0 rgba(0,0,0,.35)}
+  .rec-btn:active{transform:translateY(1px)}
+  .rec-btn.start{background:linear-gradient(180deg,var(--ok),var(--ok-2));box-shadow:0 3px 14px rgba(16,185,129,.35)}
+  .rec-btn.stop{background:linear-gradient(180deg,var(--save),var(--save-2));box-shadow:0 3px 14px rgba(124,108,240,.35)}
+  .rec-btn.upload{background:linear-gradient(180deg,#3b82f6,#2563eb);box-shadow:0 3px 14px rgba(37,99,235,.32);
+                  padding-left:20px;padding-right:20px}
+  .rec-btn:hover:not(:disabled){filter:brightness(1.08)}
+  .rec-btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;filter:grayscale(.3)}
+  .rec-btn .kbd{font-family:var(--mono);font-size:11px;font-weight:600;opacity:.85;
+                background:rgba(0,0,0,.22);padding:1px 6px;border-radius:5px}
+
+  .recstat{display:flex;align-items:center;gap:10px;padding:0 4px}
+  .recstat .dot{width:12px;height:12px;border-radius:50%;background:var(--faint);flex:none}
+  .recstat.on .dot{background:var(--live);animation:blink 1s steps(2,start) infinite}
+  .task-progress{display:flex;align-items:center;gap:6px}
+  .recstat .txt{font-family:var(--mono);font-size:13px;color:var(--ink);min-width:150px}
+  .task-switch{border:1px solid var(--line);border-radius:7px;background:var(--panel-2);
+               color:var(--accent-2);font:11px var(--sans);padding:6px 8px;cursor:pointer;
+               white-space:nowrap;transition:border-color .15s,color .15s,background .15s}
+  .task-switch:hover:not(:disabled){border-color:var(--accent);color:#fff;background:var(--panel)}
+  .task-switch:disabled{opacity:.35;cursor:not-allowed}
+  .task-switch:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .recstat .counts{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .countdown-setting{display:flex;align-items:center;gap:5px;color:var(--dim);font-size:12px;white-space:nowrap}
+  .countdown-setting input{width:58px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);
+                           color:var(--ink);font:12px var(--mono);padding:7px 5px;text-align:center}
+  #upload-status{max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #storage-status{white-space:nowrap}
+  #storage-status.over{color:var(--live);font-weight:700}
+
+  .spacer{flex:1}
+  .toggles{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .toggles label{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;font-size:12px;color:var(--dim)}
+  .toggles input{accent-color:var(--accent);cursor:pointer}
+  .toggles input[type=range]{width:74px}
+  .mini{border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--dim);
+        font-family:var(--sans);font-size:12px;padding:9px 13px;cursor:pointer;transition:border-color .15s,color .15s}
+  .mini:hover{color:var(--ink)}
+  .mini.danger:hover{border-color:var(--live);color:var(--live)}
+  .hint{font-family:var(--mono);font-size:10px;color:var(--faint)}
+
+  #err{position:fixed;inset:0;background:rgba(8,10,14,.94);color:var(--ink);display:none;
+       align-items:center;justify-content:center;z-index:99;padding:32px}
+  #err .box{max-width:560px;font-family:var(--mono);font-size:13px;line-height:1.8;
+       border:1px solid var(--line);border-radius:10px;padding:22px 26px;background:var(--panel)}
+  #err h2{margin:0 0 10px;font-size:15px;color:var(--live)}
+
+  #toast{position:fixed;left:50%;bottom:86px;transform:translateX(-50%);z-index:60;
+         font-family:var(--mono);font-size:12px;color:var(--ink);background:rgba(20,26,34,.95);
+         border:1px solid var(--line);border-radius:8px;padding:9px 15px;opacity:0;
+         transition:opacity .2s;pointer-events:none}
+  #toast.show{opacity:1}
+  #countdown-overlay{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;
+                     pointer-events:none;background:rgba(8,10,14,.32);backdrop-filter:blur(2px)}
+  #countdown-overlay.show{display:flex}
+  #countdown-content{display:flex;flex-direction:column;align-items:center;gap:26px}
+  #countdown-task{max-width:min(900px,90vw);padding:14px 24px;border-radius:12px;
+                  color:#fff;background:rgba(20,26,34,.94);border:1px solid var(--accent);
+                  box-shadow:0 10px 45px rgba(0,0,0,.35);font:700 clamp(42px,5vw,64px) var(--sans);
+                  text-align:center;overflow-wrap:anywhere}
+  #countdown-number{width:190px;height:190px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+                    color:#fff;font:700 92px var(--mono);background:rgba(16,185,129,.88);
+                    border:4px solid rgba(255,255,255,.7);box-shadow:0 0 55px rgba(16,185,129,.5)}
+
+  @media (max-width: 900px){
+    main{grid-template-columns:1fr;grid-template-rows:auto auto auto;
+         grid-template-areas:"video" "trackers" "gloves";overflow:auto}
+    main.with-tactile{grid-template-columns:1fr;grid-template-rows:auto auto minmax(560px,auto);
+         grid-template-areas:"video" "trackers" "gloves"}
+    .panel{min-height:280px}
+    #panel-gloves{min-height:220px}
+    main.with-tactile #panel-gloves{min-height:560px}
+    .transport{flex-wrap:wrap;gap:10px}
+    .spacer{flex-basis:100%;height:0}
+  }
+  @media (max-width: 620px){
+    main.with-tactile{grid-template-rows:auto auto auto}
+    main.with-tactile #panel-gloves{min-height:1040px}
+    main.with-tactile .glove-grid{grid-template-rows:repeat(2,minmax(490px,auto))}
+    main.with-tactile .glove-pair{grid-template-columns:1fr;grid-template-rows:230px minmax(240px,auto)}
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Ego 数据实时采集</h1>
+    <span class="sub" id="h-sub">连接中…</span>
+    <span class="total" id="h-total">今日录制 <b>0.000</b> 分钟</span>
+    <span class="spacer"></span>
+    <span class="agent" id="agent-status"></span>
+    <span class="stat" id="h-stats"></span>
+  </header>
+
+  <main>
+    <section class="panel" id="panel-video">
+      <div class="tag"><b>相机</b> · GoPro 直播</div>
+      <div class="camera-tools">
+        <span class="camera-state" id="camera-state" title="相机画面连接状态">
+          <span class="camera-light" id="camera-light"></span>
+          <span id="camera-state-text">检测中</span>
+        </span>
+        <button type="button" class="camera-toggle" id="btn-camera-view"
+                aria-pressed="true">隐藏画面</button>
+      </div>
+      <div class="cam-rec" id="cam-rec"><span class="d"></span><span id="cam-rec-t">REC</span></div>
+      <img id="cam" data-src="stream.mjpg" alt="camera"/>
+      <div class="novideo" id="novideo">
+        <div class="big">暂无相机画面</div>
+        <div>未接采集卡 / GoPro 未开机 / 选择了 --no-camera。</div>
+      </div>
+      <div class="novideo" id="camera-hidden">
+        <div class="big">相机画面已隐藏</div>
+        <div>点击右上角“显示画面”可恢复预览；后台录制不受影响。</div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-trackers">
+      <div class="tag"><b>Tracker</b> · 世界空间 (m)</div>
+      <div class="legend" id="tracker-legend"><span style="color:var(--dim)">等待 tracker 数据…</span></div>
+      <div class="legend" id="axis-legend">
+        <span class="ax"><i style="background:var(--x)"></i>X</span>
+        <span class="ax"><i style="background:var(--y)"></i>Y↑</span>
+        <span class="ax"><i style="background:var(--z)"></i>Z</span>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-gloves">
+      <div class="tag glove-panel-tag"><b>Wuji 手套</b> · 骨骼与 24×31 触觉压力矩阵（0–1）</div>
+      <div class="glove-grid">
+        <div class="glove-pair">
+          <div class="hand" id="hand-left">
+            <div class="hlabel"><b>左手</b> · 手套骨骼</div>
+            <div class="empty-hint" id="empty-left">等待左手数据…</div>
+          </div>
+          <div class="tactile-hand">
+          <div class="tactile-head"><b>左手</b><span>压力热力图</span>
+            <span class="tactile-stats" id="tactile-stats-left">等待数据…</span></div>
+          <div class="tactile-canvas-wrap">
+            <canvas class="tactile-canvas" id="tactile-left"></canvas>
+            <div class="tactile-empty" id="tactile-empty-left">等待左手触觉数据…</div>
+            <span class="tactile-scale"><span>0</span><i></i><span>1</span></span>
+          </div>
+        </div>
+        </div>
+        <div class="glove-pair">
+          <div class="hand" id="hand-right">
+            <div class="hlabel"><b>右手</b> · 手套骨骼</div>
+            <div class="empty-hint" id="empty-right">等待右手数据…</div>
+          </div>
+          <div class="tactile-hand">
+          <div class="tactile-head"><b>右手</b><span>压力热力图</span>
+            <span class="tactile-stats" id="tactile-stats-right">等待数据…</span></div>
+          <div class="tactile-canvas-wrap">
+            <canvas class="tactile-canvas" id="tactile-right"></canvas>
+            <div class="tactile-empty" id="tactile-empty-right">等待右手触觉数据…</div>
+            <span class="tactile-scale"><span>0</span><i></i><span>1</span></span>
+          </div>
+        </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="transport">
+    <button id="btn-start" class="rec-btn start">● 开始记录 <span class="kbd">R</span></button>
+    <button id="btn-stop"  class="rec-btn stop" disabled>■ 完成并保存 <span class="kbd">E</span></button>
+    <button id="btn-upload" class="rec-btn upload" disabled>↑ 上传数据</button>
+    <label class="countdown-setting">倒计时
+      <input id="countdown-seconds" type="number" min="0" max="3600" step="0.5" value="3"/> 秒
+    </label>
+    <div class="recstat" id="recstat">
+      <span class="dot"></span>
+      <div class="task-progress" aria-label="任务进度与切换">
+        <button type="button" class="task-switch" id="btn-task-prev"
+                title="切换到上一个采集任务" disabled>← 上一任务</button>
+        <span class="txt" id="rec-text" aria-live="polite">就绪</span>
+        <button type="button" class="task-switch" id="btn-task-next"
+                title="切换到下一个采集任务" disabled>下一任务 →</button>
+      </div>
+      <span class="counts" id="rec-counts"></span>
+      <span class="counts" id="storage-status">存储计算中…</span>
+      <span class="counts" id="upload-status"></span>
+    </div>
+    <span class="spacer"></span>
+    <div class="toggles">
+      <label><input type="checkbox" id="t-grid" checked/>网格</label>
+      <label><input type="checkbox" id="t-labels" checked/>名称</label>
+      <label><input type="checkbox" id="t-trails" checked/>轨迹</label>
+      <label>轴长<input type="range" id="t-axis" min="4" max="40" value="15"/></label>
+    </div>
+    <button id="btn-discard" class="mini danger" title="终止并丢弃 (键盘 D)">丢弃 <span style="opacity:.6">D</span></button>
+    <button id="btn-quit" class="mini danger" title="退出程序 (键盘 Q)">退出 <span style="opacity:.6">Q</span></button>
+    <span class="hint">拖动=旋转 · 滚轮=缩放 · 右键拖=平移</span>
+  </div>
+
+  <div id="countdown-overlay"><div id="countdown-content">
+    <div id="countdown-task">开始采集任务</div>
+    <div id="countdown-number">3</div>
+  </div></div>
+  <div id="toast"></div>
+  <div id="err"><div class="box"><h2>Three.js 未能加载</h2>
+    <div>本页面通过 CDN 加载 3D 库，首次打开需要联网。</div>
+    <div style="margin-top:10px;color:var(--dim)">离线方案：把 three.min.js (r128) 放到页面同目录，
+    并把本页 &lt;head&gt; 里的 CDN &lt;script src&gt; 改成 <b>./three.min.js</b> 后刷新。</div>
+  </div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+
+// ---------- 手指配色 ----------
+const FINGER_COLORS = [0xff6b6b, 0xffd166, 0x06d6a0, 0x4cc9f0, 0xb085f5]; // thumb..pinky
+const ROOT_COLOR = 0xe6ebf2;
+function fingerColor(fid){ return (fid>=0 && fid<FINGER_COLORS.length) ? FINGER_COLORS[fid] : ROOT_COLOR; }
+
+// ---------- 标准手部骨骼拓扑（实际渲染优先使用服务端上报关系） ----------
+const WUJI_21 = [-1,0,1,2,3, 0,5,6,7, 0,9,10,11, 0,13,14,15, 0,17,18,19];
+const MANUS_21 = WUJI_21.slice();         // Manus 已规约为与 wuji 相同的 21 节点 (MediaPipe)
+const MANUS_25 = [-1, 0,1,2,3, 0,5,6,7,8, 0,10,11,12,13,
+                  0,15,16,17,18, 0,20,21,22,23];   // 旧版 25 节点数据兼容
+function standardParents(N){
+  if(N === 21) return MANUS_21.slice();
+  if(N === 25) return MANUS_25.slice();
+  return new Array(N).fill(-1);           // 未知布局不臆造关节连线
+}
+function fingerIds(parents){
+  const n = parents.length;
+  let root = parents.indexOf(-1); if(root < 0) root = 0;
+  const bases = [];
+  for(let i=0;i<n;i++) if(parents[i]===root && i!==root) bases.push(i);
+  const order = {}; bases.forEach((b,k)=>order[b]=k);
+  const fid = new Array(n).fill(-1);
+  for(let i=0;i<n;i++){
+    if(i===root) continue;
+    let j=i, guard=0;
+    while(j!==-1 && parents[j]!==root && guard<n){ j=parents[j]; guard++; }
+    fid[i] = (j in order) ? order[j] : -1;
+  }
+  return fid;
+}
+
+// ---------- 轻量轨道控制 ----------
+class Orbit{
+  constructor(camera,dom,target){
+    this.cam=camera; this.dom=dom;
+    this.target=target?target.clone():new THREE.Vector3();
+    const off=camera.position.clone().sub(this.target);
+    this.sph=new THREE.Spherical().setFromVector3(off);
+    this.minR=1e-3; this.maxR=1e6; this._drag=null; this._px=0; this._py=0;
+    dom.style.touchAction="none";
+    dom.addEventListener("pointerdown",e=>this._down(e));
+    dom.addEventListener("pointermove",e=>this._move(e));
+    window.addEventListener("pointerup",()=>this._drag=null);
+    dom.addEventListener("wheel",e=>this._wheel(e),{passive:false});
+    dom.addEventListener("contextmenu",e=>e.preventDefault());
+    this.update();
+  }
+  _down(e){ this._drag=(e.button===2||e.shiftKey)?"pan":"rot"; this._px=e.clientX; this._py=e.clientY; this.dom.setPointerCapture(e.pointerId); }
+  _move(e){
+    if(!this._drag) return;
+    const dx=e.clientX-this._px, dy=e.clientY-this._py; this._px=e.clientX; this._py=e.clientY;
+    if(this._drag==="rot"){ this.sph.theta-=dx*0.005; this.sph.phi=clamp(this.sph.phi-dy*0.005,0.02,Math.PI-0.02); }
+    else{ const r=this.sph.radius; const panX=-dx*r*0.0016, panY=dy*r*0.0016;
+      const te=this.cam.matrix.elements;
+      const vx=new THREE.Vector3(te[0],te[1],te[2]); const vy=new THREE.Vector3(te[4],te[5],te[6]);
+      this.target.addScaledVector(vx,panX).addScaledVector(vy,panY); }
+    this.update();
+  }
+  _wheel(e){ e.preventDefault(); this.sph.radius=clamp(this.sph.radius*(e.deltaY>0?1.1:0.9),this.minR,this.maxR); this.update(); }
+  update(){ const off=new THREE.Vector3().setFromSpherical(this.sph); this.cam.position.copy(this.target).add(off); this.cam.lookAt(this.target); }
+}
+
+// ---------- 可复用 3D 视图 ----------
+class Viewer3D{
+  constructor(panel){
+    this.panel=panel;
+    this.canvas=document.createElement("canvas");
+    panel.appendChild(this.canvas);
+    this.renderer=new THREE.WebGLRenderer({canvas:this.canvas,antialias:true,alpha:false});
+    this.renderer.setClearColor(0x0b0f14,1);
+    this.scene=new THREE.Scene();
+    this.camera=new THREE.PerspectiveCamera(45,1,0.001,1000);
+    this.camera.position.set(1,1,1.6);
+    this.scene.add(new THREE.AmbientLight(0xffffff,0.72));
+    const dir=new THREE.DirectionalLight(0xffffff,0.65); dir.position.set(2,4,3); this.scene.add(dir);
+    this.controls=new Orbit(this.camera,this.canvas,new THREE.Vector3());
+    this.grid=null; this.fitDiag=1; this._framed=false;
+    this._ro=new ResizeObserver(()=>this.resize()); this._ro.observe(panel);
+    this.resize();
+  }
+  resize(){
+    const w=this.panel.clientWidth, h=this.panel.clientHeight;
+    if(w===0||h===0) return;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+    this.renderer.setSize(w,h,false);
+    this.camera.aspect=w/h; this.camera.updateProjectionMatrix();
+  }
+  addGrid(center,minY,size){
+    if(this.grid) this.scene.remove(this.grid);
+    const div=Math.max(4,Math.min(40,Math.round(size)));
+    const g=new THREE.GridHelper(size,div,0x39485a,0x1c2531);
+    g.position.set(center.x,minY,center.z);
+    g.material.opacity=0.55; g.material.transparent=true;
+    if(!gridOn) g.visible=false;
+    this.scene.add(g); this.grid=g;
+  }
+  frameTo(min,max){
+    const center=new THREE.Vector3((min.x+max.x)/2,(min.y+max.y)/2,(min.z+max.z)/2);
+    const size=new THREE.Vector3(max.x-min.x,max.y-min.y,max.z-min.z);
+    let diag=size.length(); if(!isFinite(diag)||diag<1e-4) diag=1;
+    this.fitDiag=diag;
+    this.controls.target.copy(center);
+    this.controls.sph.radius=diag*1.6; this.controls.sph.theta=0.7; this.controls.sph.phi=1.05;
+    this.controls.minR=diag*0.05; this.controls.maxR=diag*40; this.controls.update();
+    const gsize=Math.ceil(Math.max(Math.abs(min.x),Math.abs(max.x),Math.abs(min.z),Math.abs(max.z),diag)*2);
+    this.addGrid(center,min.y,Math.max(1,gsize));
+    this._framed=true;
+  }
+  render(){ this.renderer.render(this.scene,this.camera); }
+}
+
+function makeLabelSprite(text,colorHex){
+  const pad=8, fs=44;
+  const c=document.createElement("canvas"); const ctx=c.getContext("2d");
+  ctx.font="600 "+fs+"px ui-monospace, monospace";
+  const w=Math.ceil(ctx.measureText(text).width)+pad*2; const h=fs+pad*2;
+  c.width=w; c.height=h;
+  ctx.font="600 "+fs+"px ui-monospace, monospace";
+  ctx.fillStyle="rgba(10,14,20,0.72)"; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle="rgba(120,140,165,0.5)"; ctx.lineWidth=2; ctx.strokeRect(1,1,w-2,h-2);
+  ctx.fillStyle=colorHex||"#d6dee8"; ctx.textBaseline="middle"; ctx.textAlign="left";
+  ctx.fillText(text,pad,h/2+2);
+  const tex=new THREE.CanvasTexture(c); tex.minFilter=THREE.LinearFilter;
+  const spr=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
+  spr.userData.aspect=w/h; return spr;
+}
+
+// ---------- 全局状态 ----------
+let trackerView=null;
+const trackerObjs={};                 // role -> {group,spr,axes,trail,trailPos,trailGeom,labelY}
+const handViews={left:null,right:null};
+const handObjs={left:null,right:null};// side -> {group,nodes,boneLine,boneGeom,bonePairs,bonePos,wristSpr,N}
+let gridOn=true, labelsOn=true, trailsOn=true, axisScale=1;
+let trailWin=90;
+const trailBuf={};                    // role -> [[x,y,z]...] 最近若干帧（实时自己攒轨迹）
+
+let LIVE={rec:false,dur:0,countingDown:false,countdown:0,saving:false,
+          hasCaptureDevice:true,cameraAvailable:false,cameraOnline:false,
+          taskName:"",taskIndex:1,taskCount:0,
+          totalRecordingMinutes:0,savedRecordings:0,
+          storage:{bytes:0,files:0,limitBytes:0,overLimit:false,message:""},
+          frames:{video:0,glove:0,tracker:0},hands:{},tactile:{},trackers:{}};
+let UPLOAD={enabled:false,running:false,state:"idle",message:""};
+let RECORDING_LOG_PATH="";
+let previousRec=false, previousCountdown=false, previousUploadRunning=false;
+let taskSwitchPending=false;
+let awaitingStartBeep=false, audioContext=null;
+let cameraVisible=true;
+let cameraPreferenceTouched=false;
+try{ cameraVisible=localStorage.getItem("ego-camera-visible")!=="0"; }catch(e){}
+
+function setCameraStream(enabled){
+  const cam=$("cam");
+  if(enabled){
+    if(!cam.getAttribute("src")) cam.setAttribute("src",cam.dataset.src||"stream.mjpg");
+  }else if(cam.getAttribute("src")){
+    cam.removeAttribute("src");
+  }
+}
+
+function updateCameraUI(){
+  const available=!!LIVE.cameraAvailable;
+  const online=!!LIVE.cameraOnline;
+  const cam=$("cam"), noVideo=$("novideo"), hidden=$("camera-hidden");
+  const button=$("btn-camera-view"), light=$("camera-light");
+  light.classList.toggle("online",online);
+  $("camera-state-text").textContent=online?"在线":"离线";
+  $("camera-state").title=online?"相机在线：最近成功收到画面":"相机离线：最近未收到画面";
+  button.textContent=cameraVisible?"隐藏画面":"显示画面";
+  button.setAttribute("aria-pressed",cameraVisible?"true":"false");
+
+  if(!cameraVisible){
+    setCameraStream(false);
+    cam.classList.add("hidden");
+    noVideo.style.display="none";
+    hidden.style.display="flex";
+    return;
+  }
+  hidden.style.display="none";
+  if(available){
+    cam.classList.remove("hidden");
+    setCameraStream(true);
+    noVideo.style.display=online?"none":"flex";
+  }else{
+    setCameraStream(false);
+    cam.classList.add("hidden");
+    noVideo.style.display="flex";
+  }
+}
+
+function toggleCameraView(){
+  cameraPreferenceTouched=true;
+  cameraVisible=!cameraVisible;
+  try{ localStorage.setItem("ego-camera-visible",cameraVisible?"1":"0"); }catch(e){}
+  updateCameraUI();
+}
+
+function unlockAudio(){
+  try{
+    if(!audioContext) audioContext=new (window.AudioContext||window.webkitAudioContext)();
+    if(audioContext.state==="suspended") audioContext.resume();
+  }catch(e){ audioContext=null; }
+}
+function playStartBeep(){
+  unlockAudio();
+  if(!audioContext) return;
+  try{
+    const now=audioContext.currentTime;
+    const osc=audioContext.createOscillator(), gain=audioContext.createGain();
+    osc.type="square"; osc.frequency.setValueAtTime(1100,now);
+    gain.gain.setValueAtTime(0.0001,now);
+    gain.gain.exponentialRampToValueAtTime(0.22,now+0.02);
+    gain.gain.setValueAtTime(0.22,now+0.42);
+    gain.gain.exponentialRampToValueAtTime(0.0001,now+0.62);
+    osc.connect(gain); gain.connect(audioContext.destination);
+    osc.start(now); osc.stop(now+0.64);
+  }catch(e){ /* 浏览器禁音时仍由服务端终端响铃兜底 */ }
+}
+
+// ---------- 构建 tracker marker（角色首次出现时动态创建） ----------
+function ensureTrackerView(){
+  if(trackerView) return;
+  trackerView=new Viewer3D($("panel-trackers"));
+  trackerView.frameTo(new THREE.Vector3(-1,0,-1), new THREE.Vector3(1,2,1));
+}
+function ensureTrackerRole(r){
+  ensureTrackerView();
+  if(trackerObjs[r]) return;
+  const axisLen=trackerView.fitDiag*0.12;
+  const group=new THREE.Group();
+  const axes=new THREE.AxesHelper(axisLen); axes.material.vertexColors=true; group.add(axes);
+  const dot=new THREE.Mesh(new THREE.SphereGeometry(axisLen*0.12,12,12),
+                           new THREE.MeshStandardMaterial({color:0xffffff,emissive:0x222222})); group.add(dot);
+  const spr=makeLabelSprite(r,"#c4b5fd");
+  const lh=trackerView.fitDiag*0.05; spr.scale.set(lh*spr.userData.aspect,lh,1);
+  trackerView.scene.add(spr);
+  const trailGeom=new THREE.BufferGeometry();
+  const trailPos=new Float32Array((trailWin+1)*3);
+  trailGeom.setAttribute("position",new THREE.BufferAttribute(trailPos,3)); trailGeom.setDrawRange(0,0);
+  const trail=new THREE.Line(trailGeom,new THREE.LineBasicMaterial({color:0x5a6b80,transparent:true,opacity:0.8}));
+  trackerView.scene.add(trail); trackerView.scene.add(group);
+  axes.scale.setScalar(axisScale);
+  trackerObjs[r]={group,spr,axes,trail,trailPos,trailGeom,labelY:axisLen*1.25};
+  trailBuf[r]=[];
+  // 图例行
+  const legend=$("tracker-legend");
+  if(legend.querySelector(".ph")){ legend.innerHTML=""; }
+  if(!$("xyz-"+r)){
+    const row=document.createElement("div"); row.className="row";
+    row.innerHTML='<span class="name">'+r+'</span><span class="xyz" id="xyz-'+r+'">—</span>';
+    legend.appendChild(row);
+  }
+}
+
+// ---------- 构建一只手（首帧到达时按节点数建骨架） ----------
+function buildHand(side, N, parents){
+  const host=$(side==="left"?"hand-left":"hand-right");
+  const view=new Viewer3D(host); handViews[side]=view;
+  view.frameTo(new THREE.Vector3(-0.12,-0.12,-0.12), new THREE.Vector3(0.12,0.12,0.12));
+  parents = parents && parents.length===N ? parents : standardParents(N);
+  const fids=fingerIds(parents);
+  const nodeR=Math.max(0.002, view.fitDiag*0.018);
+  const group=new THREE.Group();
+  const nodes=[];
+  const children=new Array(N).fill(0);
+  for(let i=0;i<N;i++) if(parents[i]>=0) children[parents[i]]++;
+  for(let i=0;i<N;i++){
+    const col=fingerColor(fids[i]);
+    const isRoot=parents[i]===-1; const isTip=children[i]===0 && !isRoot;
+    const r=isRoot?nodeR*1.6:(isTip?nodeR*1.25:nodeR);
+    const m=new THREE.Mesh(new THREE.SphereGeometry(r,12,12),
+      new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:0.28,roughness:0.5}));
+    group.add(m); nodes.push(m);
+  }
+  const bonePairs=[];
+  for(let c=0;c<N;c++) if(parents[c]>=0) bonePairs.push([c,parents[c]]);
+  const bonePos=new Float32Array(bonePairs.length*2*3);
+  const boneColors=new Float32Array(bonePairs.length*2*3);
+  for(let bi=0;bi<bonePairs.length;bi++){
+    const col=new THREE.Color(fingerColor(fids[bonePairs[bi][0]]));
+    for(let k=0;k<2;k++){ boneColors[bi*6+k*3]=col.r; boneColors[bi*6+k*3+1]=col.g; boneColors[bi*6+k*3+2]=col.b; }
+  }
+  const boneGeom=new THREE.BufferGeometry();
+  boneGeom.setAttribute("position",new THREE.BufferAttribute(bonePos,3));
+  boneGeom.setAttribute("color",new THREE.BufferAttribute(boneColors,3));
+  const boneLine=new THREE.LineSegments(boneGeom,new THREE.LineBasicMaterial({vertexColors:true,linewidth:2}));
+  group.add(boneLine);
+  const spr=makeLabelSprite(side==="left"?"L":"R","#c4b5fd");
+  const lh=view.fitDiag*0.06; spr.scale.set(lh*spr.userData.aspect,lh,1); spr.userData.baseH=lh; group.add(spr);
+  view.scene.add(group);
+  handObjs[side]={group,nodes,boneLine,boneGeom,bonePairs,bonePos,wristSpr:spr,N,
+    parentKey:parents.join(","),rootIdx:Math.max(0,parents.indexOf(-1))};
+  const eh=$(side==="left"?"empty-left":"empty-right"); if(eh) eh.style.display="none";
+}
+
+// 用当前帧自适应取景一次（首帧或节点数变化时）
+function fitHand(side, pts){
+  const view=handViews[side]; if(!view) return;
+  const min=new THREE.Vector3(Infinity,Infinity,Infinity), max=new THREE.Vector3(-Infinity,-Infinity,-Infinity);
+  for(const p of pts){ min.x=Math.min(min.x,p[0]); min.y=Math.min(min.y,p[1]); min.z=Math.min(min.z,p[2]);
+                       max.x=Math.max(max.x,p[0]); max.y=Math.max(max.y,p[1]); max.z=Math.max(max.z,p[2]); }
+  if(isFinite(min.x)) view.frameTo(min,max);
+}
+
+// ---------- 每帧更新（读 LIVE 快照） ----------
+function updateHands(){
+  for(const side of ["left","right"]){
+    const pts=LIVE.hands[side];
+    if(!pts || !pts.length) continue;
+    const parents=(LIVE.handParents&&LIVE.handParents[side])||standardParents(pts.length);
+    const parentKey=parents.length===pts.length?parents.join(","):standardParents(pts.length).join(",");
+    if(!handObjs[side] || handObjs[side].N!==pts.length || handObjs[side].parentKey!==parentKey){
+      if(handViews[side]){ /* 节点数或父子关系变化：重建 */
+        try{ handViews[side].panel.querySelectorAll("canvas").forEach(c=>c.remove()); }catch(e){}
+        handViews[side]=null; handObjs[side]=null;
+      }
+      buildHand(side, pts.length, parents);
+      fitHand(side, pts);
+    }
+    const o=handObjs[side];
+    for(let i=0;i<o.nodes.length && i<pts.length;i++){ const p=pts[i]; o.nodes[i].position.set(p[0],p[1],p[2]); }
+    let ptr=0;
+    for(let b=0;b<o.bonePairs.length;b++){
+      const pc=pts[o.bonePairs[b][0]], pp=pts[o.bonePairs[b][1]];
+      if(!pc||!pp) continue;
+      o.bonePos[ptr++]=pc[0]; o.bonePos[ptr++]=pc[1]; o.bonePos[ptr++]=pc[2];
+      o.bonePos[ptr++]=pp[0]; o.bonePos[ptr++]=pp[1]; o.bonePos[ptr++]=pp[2];
+    }
+    o.boneGeom.attributes.position.needsUpdate=true;
+    const root=pts[o.rootIdx]||pts[0];
+    o.wristSpr.visible=labelsOn;
+    o.wristSpr.position.set(root[0], root[1]+o.wristSpr.userData.baseH*1.4, root[2]);
+  }
+}
+
+// ---------- Wuji 触觉矩阵热力图 ----------
+function tactileColor(value){
+  if(value<0) return "#111821";              // SDK: -1 为无效触点
+  const t=Math.pow(clamp(value,0,1),0.55);
+  const hue=220*(1-t);                        // 低压蓝色，高压红色
+  const light=17+43*t;
+  return "hsl("+hue.toFixed(0)+",88%,"+light.toFixed(0)+"%)";
+}
+function drawTactile(side){
+  const frame=(LIVE.tactile||{})[side];
+  if(!frame||!frame.values||!frame.values.length) return;
+  const rows=Number(frame.rows)||24, cols=Number(frame.cols)||31;
+  if(frame.values.length!==rows*cols) return;
+  const canvas=$("tactile-"+side), wrap=canvas.parentElement;
+  const ratio=Math.min(window.devicePixelRatio||1,2);
+  const width=Math.max(1,Math.floor(wrap.clientWidth*ratio));
+  const height=Math.max(1,Math.floor(wrap.clientHeight*ratio));
+  if(canvas.width!==width||canvas.height!==height){ canvas.width=width; canvas.height=height; }
+  const ctx=canvas.getContext("2d"); ctx.clearRect(0,0,width,height);
+  const pad=Math.max(4,Math.round(8*ratio));
+  const cellW=(width-pad*2)/cols, cellH=(height-pad*2)/rows;
+  const gap=Math.max(.35,Math.min(cellW,cellH)*.08);
+  let max=0,sum=0,valid=0,active=0;
+  for(let row=0;row<rows;row++){
+    for(let col=0;col<cols;col++){
+      const value=Number(frame.values[row*cols+col]);
+      ctx.fillStyle=tactileColor(value);
+      ctx.fillRect(pad+col*cellW+gap/2,pad+row*cellH+gap/2,
+                   Math.max(.5,cellW-gap),Math.max(.5,cellH-gap));
+      if(value>=0){ valid++; sum+=value; max=Math.max(max,value); if(value>=.05) active++; }
+    }
+  }
+  $("tactile-empty-"+side).style.display="none";
+  $("tactile-stats-"+side).textContent=
+    "max "+max.toFixed(2)+" · avg "+(valid?sum/valid:0).toFixed(3)+" · ≥.05 "+active;
+}
+function updateTactile(){
+  drawTactile("left"); drawTactile("right");
+}
+
+function updateTrackers(){
+  const roles=LIVE.trackers||{};
+  for(const r in roles) ensureTrackerRole(r);
+  for(const r in trackerObjs){
+    const o=trackerObjs[r]; const pr=roles[r];
+    const ok = pr && pr.valid!==false && pr.p;
+    o.group.visible=!!ok;
+    const xyzEl=$("xyz-"+r);
+    if(ok){
+      const p=pr.p, q=pr.q||[1,0,0,0];      // q=wxyz
+      o.group.position.set(p[0],p[1],p[2]);
+      o.group.quaternion.set(q[1],q[2],q[3],q[0]);
+      o.spr.position.set(p[0],p[1]+o.labelY,p[2]); o.spr.visible=labelsOn;
+      if(xyzEl) xyzEl.innerHTML=p[0].toFixed(2)+", "+p[1].toFixed(2)+", "+p[2].toFixed(2);
+      // 轨迹（实时自攒）
+      let buf=trailBuf[r]; if(!buf){ buf=trailBuf[r]=[]; }
+      buf.push([p[0],p[1],p[2]]); if(buf.length>trailWin) buf.shift();
+      for(let i=0;i<buf.length;i++){ o.trailPos[i*3]=buf[i][0]; o.trailPos[i*3+1]=buf[i][1]; o.trailPos[i*3+2]=buf[i][2]; }
+      o.trailGeom.setDrawRange(0,buf.length); o.trailGeom.attributes.position.needsUpdate=true;
+      o.trail.visible=trailsOn;
+    }else{
+      o.spr.visible=false;
+      if(xyzEl) xyzEl.innerHTML='<span class="off">— 未定位 —</span>';
+      o.trail.visible=false;
+    }
+  }
+}
+
+// ---------- 录制状态栏 ----------
+function fmtDur(s){ s=Math.max(0,s); const m=Math.floor(s/60); const ss=Math.floor(s%60);
+  return m+":"+String(ss).padStart(2,"0"); }
+function fmtGB(bytes){ return (Math.max(0,Number(bytes)||0)/(1024*1024*1024)).toFixed(1); }
+function updateStorageUI(){
+  const s=LIVE.storage||{};
+  const el=$("storage-status");
+  const limit=Number(s.limitBytes)||0;
+  el.textContent=(s.overLimit?"⚠ ":"")+"存储 "+fmtGB(s.bytes)+
+    (limit>0?(" / "+fmtGB(limit)+" GB"):" GB");
+  el.classList.toggle("over",!!s.overLimit);
+  el.title=(s.files==null?"":(s.files+" 个文件。"))+(s.message||"");
+}
+function updateTaskControls(){
+  const busy=!!LIVE.rec||!!LIVE.countingDown||!!LIVE.saving||!!UPLOAD.running;
+  const disabled=busy||taskSwitchPending||(Number(LIVE.taskCount)||0)<2;
+  $("btn-task-prev").disabled=disabled;
+  $("btn-task-next").disabled=disabled;
+}
+function updateRecUI(){
+  const on=!!LIVE.rec;
+  const counting=!!LIVE.countingDown;
+  const saving=!!LIVE.saving;
+  const busy=on||counting||saving;
+  const totalMinutes=Number(LIVE.totalRecordingMinutes)||0;
+  const agent=LIVE.gloveStatus||LIVE.wujiStatus||{};
+  const trackerNet=LIVE.trackerNetwork||{};
+  const agentEl=$("agent-status");
+  const gloveName=agent.label||"手套";
+  const gloveText=agent.connected?(gloveName+" 已连接"):(gloveName+" 未连接");
+  const trackerText=trackerNet.mode==="disabled"?"Tracker 已关闭":
+    (trackerNet.connected?"Tracker 已连接":"等待 Tracker");
+  agentEl.textContent=gloveText+" · "+trackerText;
+  agentEl.classList.toggle("ok",!!agent.connected&&
+    (trackerNet.mode==="disabled"||!!trackerNet.connected));
+  agentEl.classList.toggle("bad",!agent.connected||
+    (trackerNet.mode!=="disabled"&&!trackerNet.connected));
+  agentEl.title="手套连接："+(agent.endpoint||agent.mode||"—")+"；Tracker："+
+    (trackerNet.endpoint||trackerNet.mode||"—")+
+    (trackerNet.clock_rtt_us==null?"":("；校时 RTT "+trackerNet.clock_rtt_us+" µs"))+
+    (trackerNet.last_error?("；"+trackerNet.last_error):"");
+  if(LIVE.recordingLog) RECORDING_LOG_PATH=LIVE.recordingLog;
+  $("h-total").innerHTML="今日录制 <b>"+totalMinutes.toFixed(3)+"</b> 分钟";
+  $("h-total").title=(LIVE.recordingDate?LIVE.recordingDate+"；":"")+
+    "已保存 "+(LIVE.savedRecordings||0)+" 条录制数据；录制中时包含当前时长"+
+    (RECORDING_LOG_PATH?("；日志："+RECORDING_LOG_PATH):"");
+  if(on&&!previousRec&&(previousCountdown||awaitingStartBeep)){
+    playStartBeep(); awaitingStartBeep=false;
+  }
+  $("recstat").classList.toggle("on",on);
+  $("cam-rec").style.display=on?"flex":"none";
+  $("btn-start").disabled=busy||!!UPLOAD.running||LIVE.hasCaptureDevice===false;
+  $("btn-stop").disabled=!on;
+  $("countdown-seconds").disabled=busy;
+  updateTaskControls();
+  $("countdown-overlay").classList.toggle("show",counting);
+  if(counting){
+    $("countdown-task").textContent="开始采集"+(LIVE.taskName||"")+"任务";
+    $("countdown-number").textContent=(LIVE.countdown||0)>0.05?
+      String(Math.ceil(LIVE.countdown)):"GO";
+  }
+  const f=LIVE.frames||{};
+  if(on){
+    $("rec-text").textContent="● "+(LIVE.taskName||"任务")+"  "+fmtDur(LIVE.dur||0);
+    $("cam-rec-t").textContent="REC "+fmtDur(LIVE.dur||0);
+  }else if(counting){
+    $("rec-text").textContent="◷ "+(LIVE.countdown||0).toFixed(1)+" 秒后开始";
+  }else if(saving){
+    $("rec-text").textContent="正在保存数据…";
+  }else if(LIVE.hasCaptureDevice===false){
+    $("rec-text").textContent="等待采集设备…";
+  }else{
+    $("rec-text").textContent=LIVE.taskName?
+      ("待采集 ["+LIVE.taskIndex+"/"+LIVE.taskCount+"] "+LIVE.taskName):"就绪";
+  }
+  const parts=[];
+  if(f.video!=null) parts.push("视频 "+f.video);
+  if(f.glove!=null) parts.push("手套 "+f.glove);
+  if(f.tracker!=null && LIVE.hasTracker) parts.push("tracker "+f.tracker);
+  $("rec-counts").textContent=parts.join("  ·  ");
+  updateStorageUI();
+  updateUploadUI();
+  previousRec=on; previousCountdown=counting;
+}
+
+// ---------- 主渲染循环 ----------
+function loop(){
+  updateHands();
+  updateTrackers();
+  if(trackerView) trackerView.render();
+  for(const s in handViews){ if(handViews[s]) handViews[s].render(); }
+  requestAnimationFrame(loop);
+}
+
+// ---------- 轮询实时数据 ----------
+async function pollLive(){
+  try{
+    const r=await fetch("live.json",{cache:"no-store"});
+    const d=await r.json();
+    // meta.json 与 live.json 并行请求；合并而不是覆盖，避免先到的
+    // handParents 被下一次实时轮询清掉。
+    LIVE={...LIVE,...d};
+    updateCameraUI();
+    updateRecUI();
+    updateTactile();
+  }catch(e){ /* 网络抖动忽略 */ }
+}
+
+// ---------- 发送控制指令（按钮 & 键盘统一走这里 -> 服务端同一队列） ----------
+let toastTimer=null;
+function toast(msg){
+  const t=$("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),1600);
+}
+async function sendCmd(k, label, params){
+  try{
+    const query=new URLSearchParams({k:k});
+    for(const name in (params||{})) query.set(name,String(params[name]));
+    const r=await fetch("cmd?"+query.toString(),{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(d && d.msg) toast(d.msg); else if(label) toast(label);
+    pollLive();
+    return r.ok&&d.ok!==false;
+  }catch(e){ toast("发送失败：服务端未响应"); return false; }
+}
+
+async function requestRecording(){
+  const input=$("countdown-seconds");
+  const seconds=Number(input.value);
+  if(!Number.isFinite(seconds)||seconds<0||seconds>3600){
+    toast("倒计时必须是 0～3600 秒"); input.focus(); return;
+  }
+  unlockAudio();
+  awaitingStartBeep=true;
+  const ok=await sendCmd("r","开始记录倒计时",{countdown:seconds});
+  if(!ok) awaitingStartBeep=false;
+}
+
+function updateUploadUI(){
+  const btn=$("btn-upload");
+  const captureBusy=!!LIVE.rec||!!LIVE.countingDown||!!LIVE.saving;
+  btn.disabled=!UPLOAD.enabled||!!UPLOAD.running||captureBusy;
+  btn.textContent=UPLOAD.running?(UPLOAD.automatic?"↑ 自动清理中…":"↑ 上传中…"):"↑ 上传数据";
+  btn.title=UPLOAD.enabled?(UPLOAD.remote||"上传数据"):
+    "未配置上传目标；启动时添加 --rclone-remote remote:bucket/path";
+  $("upload-status").textContent=UPLOAD.message||"";
+  updateTaskControls();
+}
+
+async function switchTask(offset){
+  if(taskSwitchPending) return;
+  taskSwitchPending=true;
+  updateTaskControls();
+  try{
+    const query=new URLSearchParams({offset:String(offset)});
+    const r=await fetch("task?"+query.toString(),{method:"POST"});
+    const d=await r.json().catch(()=>({msg:"服务端响应异常"}));
+    if(d.taskName!=null){
+      LIVE.taskName=d.taskName;
+      LIVE.taskIndex=d.taskIndex;
+      LIVE.taskCount=d.taskCount;
+      updateRecUI();
+    }
+    toast(d.msg||(r.ok?"任务已切换":"无法切换任务"));
+  }catch(e){
+    toast("切换失败：服务端未响应");
+  }finally{
+    taskSwitchPending=false;
+    await pollLive();
+    updateTaskControls();
+  }
+}
+
+async function pollUpload(){
+  try{
+    const r=await fetch("upload.json",{cache:"no-store"});
+    const d=await r.json();
+    if(previousUploadRunning&&!d.running){
+      const successText=(d.automatic&&d.mode==="move")?"自动上传清理完成":"数据上传完成";
+      toast(d.state==="success"?successText:"数据上传失败："+(d.message||"请查看终端"));
+    }
+    UPLOAD=d; previousUploadRunning=!!d.running; updateUploadUI();
+  }catch(e){ /* 服务短暂不可用时保留上次状态 */ }
+}
+
+async function startUpload(){
+  try{
+    const r=await fetch("upload",{method:"POST"});
+    const d=await r.json().catch(()=>({message:"服务端响应异常"}));
+    UPLOAD={...UPLOAD,...d};
+    toast(d.message||(r.ok?"上传任务已开始":"无法开始上传"));
+    previousUploadRunning=!!UPLOAD.running;
+    updateUploadUI();
+  }catch(e){ toast("上传失败：服务端未响应"); }
+}
+
+// ---------- 头部信息 ----------
+async function loadMeta(){
+  try{
+    const r=await fetch("meta.json",{cache:"no-store"}); const m=await r.json();
+    LIVE.hasTracker = !!m.tracker;
+    LIVE.hasCaptureDevice = m.has_capture_device!==false;
+    LIVE.cameraAvailable = !!m.camera;
+    if(m.glove_type==="wuji"&&!cameraPreferenceTouched){
+      cameraVisible=m.camera_preview?.default_visible!==false;
+    }
+    const parts=[];
+    if(m.camera){
+      let cameraText="视频 <b>"+(m.camera.fps||0)+"</b> fps · "+m.camera.width+"×"+m.camera.height;
+      if(m.camera_preview){ cameraText+="（监看 "+m.camera_preview.width+"×"+m.camera_preview.height+"）"; }
+      parts.push(cameraText);
+    }
+    else parts.push("视频 <b>无</b>");
+    parts.push("手套 <b>"+(m.gloves||0)+"</b> 只");
+    if(m.glove_type) parts.push("类型 <b>"+m.glove_type.toUpperCase()+"</b>");
+    if(m.glove_transport&&m.glove_transport.mode) parts.push("连接 <b>"+m.glove_transport.mode.toUpperCase()+"</b>");
+    parts.push("tracker <b>"+(m.tracker?"有":"无")+"</b>");
+    if(m.udp) parts.push("UDP <b>"+m.udp+"</b>");
+    $("h-stats").innerHTML=parts.join(" &nbsp;·&nbsp; ");
+    $("h-sub").textContent=m.save_dir?("保存至 "+m.save_dir+"/"):"就绪";
+    const countdownInput=$("countdown-seconds");
+    countdownInput.value=String(m.record_countdown==null?3:m.record_countdown);
+    UPLOAD.enabled=!!m.upload_enabled;
+    UPLOAD.remote=m.upload_remote||"";
+    RECORDING_LOG_PATH=m.recording_log||"";
+    updateUploadUI();
+    updateCameraUI();
+    if(m.handParents) LIVE.handParents=m.handParents;
+    if(m.glove_type==="wuji") document.querySelector("main").classList.add("with-tactile");
+  }catch(e){ $("h-sub").textContent="（meta 未就绪）"; }
+}
+
+// ---------- 初始化 ----------
+function initControls(){
+  $("btn-start").addEventListener("click",requestRecording);
+  $("btn-stop").addEventListener("click",()=>sendCmd("e","完成并保存"));
+  $("btn-task-prev").addEventListener("click",()=>switchTask(-1));
+  $("btn-task-next").addEventListener("click",()=>switchTask(1));
+  $("btn-upload").addEventListener("click",startUpload);
+  $("btn-camera-view").addEventListener("click",toggleCameraView);
+  $("btn-discard").addEventListener("click",()=>{
+    if(LIVE.countingDown) sendCmd("d","已取消倒计时");
+    else if(confirm("终止并丢弃当前记录（不落盘）？")) sendCmd("d","已丢弃");
+  });
+  $("btn-quit").addEventListener("click",()=>{ if(confirm("退出采集程序？")) sendCmd("q","正在退出…"); });
+
+  // 键盘：页面聚焦时 r/d/e/q 也可用（与终端键盘、页面按钮三者并行）
+  document.addEventListener("keydown",e=>{
+    const tag=(e.target.tagName||"").toUpperCase();
+    if(tag==="INPUT"||tag==="SELECT"||tag==="TEXTAREA") return;
+    const k=e.key.toLowerCase();
+    if(k==="r"){ e.preventDefault(); requestRecording(); }
+    else if(k==="e"){ e.preventDefault(); sendCmd("e","完成并保存"); }
+    else if(k==="d"){ e.preventDefault(); sendCmd("d","丢弃"); }
+    else if(k==="q"){ e.preventDefault(); if(confirm("退出采集程序？")) sendCmd("q","正在退出…"); }
+  });
+
+  $("t-grid").addEventListener("change",e=>{ gridOn=e.target.checked;
+    if(trackerView&&trackerView.grid) trackerView.grid.visible=gridOn;
+    for(const s in handViews){ if(handViews[s]&&handViews[s].grid) handViews[s].grid.visible=gridOn; } });
+  $("t-labels").addEventListener("change",e=>{ labelsOn=e.target.checked; });
+  $("t-trails").addEventListener("change",e=>{ trailsOn=e.target.checked; });
+  $("t-axis").addEventListener("input",e=>{ axisScale=parseInt(e.target.value,10)/15;
+    for(const r in trackerObjs) trackerObjs[r].axes.scale.setScalar(axisScale); });
+
+  $("cam").addEventListener("error",()=>{
+    if(cameraVisible&&LIVE.cameraAvailable){
+      setTimeout(()=>{
+        if(cameraVisible&&LIVE.cameraAvailable){ setCameraStream(false); setCameraStream(true); }
+      },1000);
+    }
+  });
+  updateCameraUI();
+}
+
+function start(){
+  if(typeof THREE==="undefined"){ $("err").style.display="flex"; return; }
+  initControls();
+  loadMeta();
+  pollLive();
+  pollUpload();
+  setInterval(pollLive, 66);         // 位姿/状态轮询 ~15Hz（渲染由 rAF 独立 60Hz；相机走 MJPEG 独立帧率）
+  setInterval(pollUpload, 1000);
+  requestAnimationFrame(loop);
+}
+start();
+</script>
+</body>
+</html>

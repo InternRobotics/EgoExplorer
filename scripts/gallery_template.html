@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>五 Tracker → SMPL-X 批处理 Gallery</title>
+<style>
+:root{color-scheme:dark;--bg:#0f1115;--panel:#171a21;--line:#262b36;--fg:#e6e9ef;--dim:#8b93a3;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--accent:#60a5fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+header{padding:18px 20px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+h1{margin:0 0 6px;font-size:17px;font-weight:600}
+.sub{color:var(--dim);font-size:12px;margin-bottom:12px}
+.legend{margin-top:6px;line-height:1.7;max-width:none}
+.legend b{color:var(--fg);font-weight:600}
+.sub code{background:var(--panel);padding:1px 5px;border-radius:4px}
+.tally{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px;font-size:12px}
+.tally b{font-size:16px;font-weight:600;margin-right:4px}
+.tally .ok b{color:var(--ok)}.tally .bad b{color:var(--bad)}.tally .warn b{color:var(--warn)}
+.bar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin-bottom:12px;background:var(--panel)}
+.bar i{display:block}
+.tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,select,button{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit}
+input[type=search]{min-width:190px}
+button{cursor:pointer}
+.chip{padding:4px 10px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--dim)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#0b1220;font-weight:600}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+main{padding:16px 20px 60px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(366px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 12px 10px;display:flex;flex-direction:column;gap:8px}
+.card.failed{opacity:.85;border-color:#3b2126}
+.card.picked{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok) inset}
+.pick{flex:0 0 auto;width:15px;height:15px;accent-color:var(--ok);cursor:pointer;margin:0 2px 0 0}
+.picked{color:var(--ok);font-weight:600;font-size:12px;white-space:nowrap}
+.chead label.pickwrap{display:flex;align-items:center;gap:5px;flex:1 0 100%;cursor:pointer}
+.chead{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px}
+/* Give the id its own row: with several badges a flex-shrunk id collapses to
+   one character per line. */
+.sid{flex:1 0 100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all}
+.tag{font-size:10.5px;padding:1px 6px;border-radius:10px;background:#22283a;color:var(--accent);white-space:nowrap}
+.tag.bad{background:#3b2126;color:var(--bad)}
+.tag.susp{background:#3a3016;color:var(--warn)}
+.tag.hand{background:#3b1f2b;color:#fb7185}
+.tag.hand.unsup{background:#232a36;color:var(--dim)}
+.tag.hand.weak{background:#33301c;color:#d9c379}
+.tag.trk{background:#3a1d1d;color:#fca5a5}
+.tag.trk.unrec{background:#2a2f3a;color:#94a3b8}
+.tag.trk.amb{background:#33301c;color:#d9c379}
+.tag.fixed{background:#13322a;color:#5eead4}
+.tag.drift{background:#3a2416;color:#fdba74}
+.tag.drift.off{background:#3b1d1d;color:#f87171}
+.tag.drift.mild{background:#262b36;color:#94a3b8}
+svg{display:block;width:100%;background:#0b0d12;border-radius:6px}
+.row{display:flex;gap:6px;align-items:flex-start}
+.row .strip{flex:1 1 auto;min-width:0}
+img.meshthumb{flex:0 0 auto;width:100px;height:150px;border-radius:6px;background:#0b0d12;object-fit:contain}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;font-size:11px;color:var(--dim)}
+.stats div{display:flex;flex-direction:column}
+.stats span{color:var(--fg);font-size:12px;font-variant-numeric:tabular-nums}
+.stats span.warn{color:var(--warn)}.stats span.bad{color:var(--bad)}
+.why{font-size:12px;color:var(--bad);line-height:1.45}
+.act{display:flex;gap:8px;align-items:center;font-size:12px}
+.act a{color:var(--accent);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:4px 9px}
+.act a:hover{border-color:var(--accent)}
+.act .none{color:var(--dim)}
+.empty{color:var(--dim);padding:40px;text-align:center}
+#count{color:var(--dim);font-size:12px;margin:10px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">五 Tracker → SMPL-X 批处理 Gallery</h1>
+  <div class="sub">输出根目录 <code id="root"></code>
+  <div class="legend"><b>每张卡片的图怎么看：</b>
+    最左一张是<b>首帧 SMPL-X mesh</b>（相机系固定光照，可横向比较体型与朝向）；
+    右侧三张是同一 session 在 <b>18% / 50% / 82%</b> 三个时刻的骨架投影（22 关节，橙点为五个 tracker 实测位置）；
+    四张共用固定物理画框（宽 1.5 m × 高 2.25 m，地面线位置恒定），所以人沉到地板下、scale 异常都能一眼看出。
+    最下方绿线是逐帧残差曲线，右下紫色小图是根轨迹俯视。
+  </div>
+</div>
+  <div class="tally" id="tally"></div>
+  <div class="bar" id="bar"></div>
+  <div class="tools">
+    <input type="search" id="q" placeholder="搜索 session id…">
+    <div class="chips" id="dsChips"></div>
+    <select id="status">
+      <option value="all" selected>全部</option>
+      <option value="ok">只看成功</option>
+      <option value="failed">只看失败</option>
+      <option value="pending">只看尚未处理</option>
+      <option value="no_tracker">只看缺少 tracker</option>
+      <option value="picked">只看已选</option>
+    </select>
+    <select id="drift">
+      <option value="any">Tracker 漂移：全部</option>
+      <option value="off_body">只看脱离身体</option>
+      <option value="drift">只看持续漂移</option>
+      <option value="jump">只看突跳</option>
+      <option value="slight_drift">只看轻微漂移</option>
+      <option value="fit_bad">只看拟合残差异常</option>
+      <option value="fit_high">只看拟合残差偏高</option>
+    </select>
+    <select id="trk">
+      <option value="any">Tracker 佩戴：全部</option>
+      <option value="swapped">只看左右反</option>
+      <option value="unrecorded">只看手部未记录</option>
+      <option value="lrfix">只看我已修正的</option>
+      <option value="ambiguous">只看存疑</option>
+      <option value="ok">只看正常</option>
+    </select>
+    <select id="hand">
+      <option value="any">手套配对：全部</option>
+      <option value="swapped">只看左右反</option>
+      <option value="weak">只看无法判定</option>
+      <option value="unsupported">只看不适用(wuji)</option>
+      <option value="ok">只看配对正常</option>
+    </select>
+    <button id="pickAll" title="把当前筛选结果全部选上">全选当前</button>
+    <button id="pickNone" title="清空所有选择">清空</button>
+    <button id="exportTxt">导出名单</button>
+    <button id="exportCsv">导出明细</button>
+    <button id="copySel">复制名单</button>
+    <span id="picked" class="picked">已选 0 条</span>
+    <select id="sort">
+      <option value="id">按 session id</option>
+      <option value="p50">按残差中位数 ↓</option>
+      <option value="p95">按残差 p95 ↓</option>
+      <option value="rot">按旋转误差 ↓</option>
+      <option value="fr">按帧数 ↓</option>
+      <option value="dur">按时长 ↓</option>
+      <option value="gap">按最大丢帧间隔 ↓</option>
+      <option value="mov">按 tracker 位移 ↑（找静止/坏采集）</option>
+    </select>
+  </div>
+  <div id="count"></div>
+</header>
+<main><div class="grid" id="grid"></div><div class="empty" id="empty" hidden>没有匹配的 session</div></main>
+<script>
+const D = /*__GALLERY_DATA__*/null;
+const parents = D.parents, VIEWER = D.viewer_dir || 'sessions';
+const REVIEW = D.review_dir || '../review';
+document.getElementById('title').textContent = D.title + ' · Gallery';
+document.getElementById('root').textContent = D.batch_root;
+
+const all = D.sessions.concat(D.failures);
+const kinds = {contact: 'contact 长度不匹配', diverged: '投影发散', proposal: '提案阶段失败', pending: '尚未处理', no_tracker: '缺少 tracker 数据流'};
+const tally = {};
+for (const s of all) tally[s.st === 'ok' ? 'ok' : s.kind] = (tally[s.st === 'ok' ? 'ok' : s.kind] || 0) + 1;
+document.getElementById('tally').innerHTML =
+  `<div class="ok"><b>${tally.ok || 0}</b>成功</div>` +
+  Object.keys(kinds).filter(k => tally[k]).map(k =>
+    `<div class="${k === 'pending' || k === 'no_tracker' ? 'warn' : 'bad'}"><b>${tally[k]}</b>${kinds[k]}</div>`).join('') +
+  `<div><b>${all.length}</b>总计</div>` +
+  (all.some(s => s.hand) ? `<div class="bad"><b>${all.filter(s => s.hand === 'swapped').length}</b>手套左右反</div>` : '') +
+  (all.some(s => s.trk) ? `<div class="bad"><b>${all.filter(s => s.trk === 'unrecorded').length}</b>手部 tracker 未记录</div>` : '') +
+  (all.some(s => s.lrfix) ? `<div class="ok"><b>${all.filter(s => s.lrfix).length}</b>tracker 左右已修正</div>` : '') +
+  (all.some(s => s.drift) ? `<div class="warn"><b>${all.filter(s => ['off_body','drift','jump'].includes(s.drift)).length}</b>tracker 漂移/脱落</div>` : '') +
+  (all.some(s => s.drift === 'fit_bad') ? `<div class="bad"><b>${all.filter(s => s.drift === 'fit_bad').length}</b>tracker 拟合异常</div>` : '');
+
+const datasets = [...new Set(all.map(s => s.ds))].sort();
+const palette = ['#60a5fa','#4ade80','#fbbf24','#f472b6','#a78bfa','#34d399','#fb923c','#38bdf8','#94a3b8'];
+const colorOf = {}; datasets.forEach((d, i) => colorOf[d] = palette[i % palette.length]);
+document.getElementById('bar').innerHTML = datasets.map(d => {
+  const n = all.filter(s => s.ds === d).length;
+  return `<i style="width:${n / all.length * 100}%;background:${colorOf[d]}" title="${d}: ${n}"></i>`;
+}).join('');
+const active = new Set();
+document.getElementById('dsChips').innerHTML = datasets
+  .map(d => `<span class="chip" data-ds="${d}">${d} ${all.filter(s => s.ds === d).length}</span>`).join('');
+
+const grid = document.getElementById('grid'), empty = document.getElementById('empty');
+// Selection is the reviewer's own work, so it survives reloads; it is scoped
+// to this batch so two galleries never overwrite each other.
+const PICK_KEY = 'ego_gallery_picked:' + (D.batch_root || 'default');
+let picked = new Set();
+try { picked = new Set(JSON.parse(localStorage.getItem(PICK_KEY) || '[]')); } catch (e) { picked = new Set(); }
+function savePicked() {
+  try { localStorage.setItem(PICK_KEY, JSON.stringify([...picked])); } catch (e) {}
+  document.getElementById('picked').textContent = `已选 ${picked.size} 条`;
+}
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], {type: type + ';charset=utf-8'}));
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function pickedRows() {
+  return all.filter(s => picked.has(s.id)).sort((a, b) => a.id.localeCompare(b.id));
+}
+function flagsOf(s) {
+  const out = [];
+  if (s.lrfix) out.push('tracker左右已修正' + (s.trkpairs ? '(' + s.trkpairs.join('+') + ')' : ''));
+  else if (s.trk && s.trk !== 'ok') out.push('tracker:' + s.trk);
+  if (s.drift) out.push('drift:' + s.drift + ((s.driftat || []).length ? '(' + s.driftat.join('+') + ')' : ''));
+  if (s.hand && s.hand !== 'ok') out.push('glove:' + s.hand);
+  if (s.st !== 'ok') out.push((s.kind === 'pending' ? 'pending:' : 'failed:') + (s.kind || ''));
+  return out.join(' | ');
+}
+let currentRows = [];
+const io = new IntersectionObserver(entries => {
+  for (const e of entries) if (e.isIntersecting) { draw(e.target); io.unobserve(e.target); }
+}, {rootMargin: '300px'});
+
+function poly(points, close) {
+  return points.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+}
+function skeleton(s) {
+  const W = 300, H = 150, pane = W / s.pose.j.length, pad = 6;
+  let out = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" height="150">`;
+  const gy = H - pad - s.pose.g / 1000 * (H - 2 * pad);
+  out += `<line x1="0" y1="${gy.toFixed(1)}" x2="${W}" y2="${gy.toFixed(1)}" stroke="#2c3342" stroke-width="1"/>`;
+  s.pose.j.forEach((flat, k) => {
+    const n = flat.length / 2, ox = k * pane;
+    const X = i => ox + pad + flat[i] / 1000 * (pane - 2 * pad);
+    const Y = i => H - pad - flat[n + i] / 1000 * (H - 2 * pad);
+    let bones = '';
+    for (let i = 1; i < n; i++) {
+      const p = parents[i];
+      if (p < 0 || p >= n) continue;
+      bones += `<line x1="${X(i).toFixed(1)}" y1="${Y(i).toFixed(1)}" x2="${X(p).toFixed(1)}" y2="${Y(p).toFixed(1)}"/>`;
+    }
+    out += `<g stroke="#7dd3fc" stroke-width="1.6" stroke-linecap="round">${bones}</g>`;
+    const t = s.pose.t[k], m = t.length / 2;
+    for (let i = 0; i < m; i++) {
+      const x = ox + pad + t[i] / 1000 * (pane - 2 * pad), y = H - pad - t[m + i] / 1000 * (H - 2 * pad);
+      out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.1" fill="#fbbf24"/>`;
+    }
+    if (k) out += `<line x1="${ox}" y1="0" x2="${ox}" y2="${H}" stroke="#1c2130"/>`;
+  });
+  return out + '</svg>';
+}
+function spark(s) {
+  const W = 300, H = 38, B = 30;
+  const pts = s.sp.map((v, i) => [i / (s.sp.length - 1) * W, H - 3 - v / 100 * (H - 14)]);
+  const path = s.pa, n = path.length / 2;
+  let trail = '';
+  for (let i = 0; i < n; i++) trail += (i ? ' ' : '') + (2 + path[i] / 100 * B).toFixed(1) + ',' + (2 + path[n + i] / 100 * B).toFixed(1);
+  // The root-path inset owns the right edge, so the residual trace stops short
+  // of it instead of running underneath.
+  const clip = W - B - 12;
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" height="38">
+    <text x="2" y="9" fill="#8b93a3" font-size="9">残差 0–${s.spm} mm</text>
+    <g clip-path="inset(0 ${W - clip}px 0 0)"><polyline points="${poly(pts)}" fill="none" stroke="#4ade80" stroke-width="1.2"/></g>
+    <g transform="translate(${W - B - 4},2)"><rect width="${B + 2}" height="${B + 2}" fill="#11151d" stroke="#1c2130" rx="2"/>
+    <polyline points="${trail}" fill="none" stroke="#a78bfa" stroke-width=".9"/></g></svg>`;
+}
+function draw(node) {
+  const s = node._s;
+  const mesh = s.mesh
+    ? `<img class="meshthumb" src="${s.mesh}" alt="首帧 mesh" title="首帧 SMPL-X mesh">`
+    : '';
+  node.querySelector('.art').innerHTML =
+    `<div class="row">${mesh}<div class="strip">${skeleton(s)}</div></div>` + spark(s);
+}
+const driftLabel = {off_body: 'tracker 脱离身体', drift: 'tracker 持续漂移',
+                   jump: 'tracker 位置突跳', slight_drift: 'tracker 轻微漂移',
+                   fit_bad: 'tracker 拟合残差异常', fit_high: 'tracker 拟合残差偏高'};
+function driftTag(s) {
+  if (!s.drift) return '';
+  const cls = s.drift === 'off_body' ? 'drift off'
+            : s.drift === 'fit_high' ? 'drift mild' : 'drift';
+  const at = (s.driftat || []).map(x => x.replace('left_', '左').replace('right_', '右')
+    .replace('wrist', '腕').replace('ankle', '踝')).join(',');
+  return `<span class="tag ${cls}">${driftLabel[s.drift]}${at ? '（' + at + '）' : ''}</span>`;
+}
+const trkLabel = {swapped: 'tracker 左右反', unrecorded: '手部 tracker 未记录',
+                  ambiguous: 'tracker 佩戴存疑', missing_roles: 'tracker 角色缺失',
+                  too_few_frames: '有效帧过少'};
+function trkTag(s) {
+  let out = '';
+  if (s.lrfix) out += `<span class="tag fixed" title="输入已由 check_tracker_lr.py + fix_tracker_lr.py 对调左右后重跑">tracker 左右已修正${s.trkpairs ? '（' + s.trkpairs.map(p => p === 'wrist' ? '手' : '脚').join('+') + '）' : ''}</span>`;
+  else if (s.trk && s.trk !== 'ok') {
+    const cls = s.trk === 'swapped' ? 'trk' : s.trk === 'unrecorded' ? 'trk unrec' : 'trk amb';
+    const extra = s.frozen && s.frozen.length ? `（${s.frozen.join(',')}）` : '';
+    out += `<span class="tag ${cls}">${trkLabel[s.trk] || s.trk}${extra}</span>`;
+  }
+  return out;
+}
+const handLabel = {swapped: '左右反', weak: '配对存疑', unsupported: 'wuji 无法判定',
+                   no_glove: '无手套', stream_broken: '流损坏', error: '检测出错'};
+function handTag(s) {
+  if (!s.hand || s.hand === 'ok') return '';
+  const cls = s.hand === 'swapped' ? 'hand' : s.hand === 'weak' ? 'hand weak' : 'hand unsup';
+  return `<span class="tag ${cls}">${handLabel[s.hand] || s.hand}</span>`;
+}
+function suspect(s) {
+  const flags = [];
+  if (s.mov < .15) flags.push('几乎不动');
+  if (s.pose.clip) flags.push('超出画框');
+  return flags.length ? `<span class="tag susp">${flags.join(' / ')}</span>` : '';
+}
+function grade(value, warn, bad) { return value >= bad ? 'bad' : value >= warn ? 'warn' : ''; }
+function card(s) {
+  const el = document.createElement('div');
+  el.className = 'card' + (s.st === 'ok' || s.kind === 'pending' ? '' : ' failed');
+  if (s.st === 'ok') {
+    el._s = s;
+    el.innerHTML = `<div class="chead"><label class="pickwrap"><input type="checkbox" class="pick"><span class="sid">${s.id}</span></label><span class="tag" style="color:${colorOf[s.ds]}">${s.ds}</span>${trkTag(s)}${driftTag(s)}${handTag(s)}${suspect(s)}</div>
+      <div class="art"></div>
+      <div class="stats">
+        <div>帧数<span>${s.fr}</span></div>
+        <div>时长<span>${s.dur}s</span></div>
+        <div>残差 p50<span class="${grade(s.p50, 6, 12)}">${s.p50} mm</span></div>
+        <div>残差 p95<span class="${grade(s.p95, 12, 25)}">${s.p95} mm</span></div>
+        <div>RMS<span>${s.rms} mm</span></div>
+        <div>旋转<span class="${grade(s.rot, 8, 15)}">${s.rot}°</span></div>
+        <div>最大间隔<span class="${grade(s.gap, .2, .5)}">${s.gap}s</span></div>
+        <div>有效率<span class="${s.val < .999 ? 'warn' : ''}">${(s.val * 100).toFixed(1)}%</span></div>
+        <div>tracker 位移<span class="${grade(-s.mov, -.4, -.15)}">${s.mov} m</span></div>
+      </div>
+      <div class="act">${s.rv
+        ? `<a href="${REVIEW}/${encodeURIComponent(s.rvslug)}.review.html" target="_blank">三联复核</a>`
+        : ''}${s.vw
+        ? `<a href="${VIEWER}/${encodeURIComponent(s.id)}/index.html" target="_blank">打开 3D mesh</a>`
+        : '<span class="none">3D mesh 未生成</span>'}</div>`;
+    io.observe(el);
+  } else {
+    el.innerHTML = `<div class="chead"><label class="pickwrap"><input type="checkbox" class="pick"><span class="sid">${s.id}</span></label><span class="tag">${s.ds}</span><span class="tag ${s.kind === 'pending' || s.kind === 'no_tracker' ? 'warn' : 'bad'}">${kinds[s.kind] || '失败'}</span>${trkTag(s)}${driftTag(s)}${handTag(s)}</div>
+      <div class="why">${s.why}</div>
+      <div class="act">${s.rv
+        ? `<a href="${REVIEW}/${encodeURIComponent(s.rvslug)}.review.html" target="_blank">三联复核（视频/触觉）</a>`
+        : '<span class="none">复核页未生成</span>'}</div>`;
+  }
+  el._sid = s.id;
+  if (picked.has(s.id)) {
+    el.classList.add('picked');
+    const box = el.querySelector('.pick');
+    if (box) box.checked = true;
+  }
+  return el;
+}
+function render() {
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const st = document.getElementById('status').value;
+  const key = document.getElementById('sort').value;
+  const hand = document.getElementById('hand').value;
+  const trk = document.getElementById('trk').value;
+  const drift = document.getElementById('drift').value;
+  let rows = all.filter(s =>
+    (st === 'picked' ? picked.has(s.id)
+      : st === 'all' ? true
+      : st === 'pending' ? s.kind === 'pending'
+      : st === 'ok' ? s.st === 'ok'
+      : st === 'no_tracker' ? s.kind === 'no_tracker'
+      : s.st !== 'ok' && s.kind !== 'pending') &&   // 只看失败 excludes the queue
+
+    (hand === 'any' || s.hand === hand) &&
+    (trk === 'any' || (trk === 'lrfix' ? !!s.lrfix : s.trk === trk && !s.lrfix)) &&
+    (drift === 'any' || s.drift === drift) &&
+    (!active.size || active.has(s.ds)) &&
+    (!q || s.id.toLowerCase().includes(q)));
+  const ascending = key === 'mov';
+  rows.sort(key === 'id'
+    ? (a, b) => a.id.localeCompare(b.id)
+    : ascending
+      ? (a, b) => (a[key] ?? 1e9) - (b[key] ?? 1e9) || a.id.localeCompare(b.id)
+      : (a, b) => (b[key] || 0) - (a[key] || 0) || a.id.localeCompare(b.id));
+  currentRows = rows;
+  grid.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  for (const s of rows) frag.appendChild(card(s));
+  grid.appendChild(frag);
+  empty.hidden = rows.length > 0;
+  document.getElementById('count').textContent = `显示 ${rows.length} / ${all.length} 条`;
+}
+grid.addEventListener('change', event => {
+  const box = event.target.closest('.pick');
+  if (!box) return;
+  const id = box.closest('.card')._sid;
+  if (box.checked) picked.add(id); else picked.delete(id);
+  box.closest('.card').classList.toggle('picked', box.checked);
+  savePicked();
+});
+document.getElementById('pickAll').onclick = () => {
+  for (const s of currentRows) picked.add(s.id);
+  savePicked(); render();
+};
+document.getElementById('pickNone').onclick = () => {
+  if (!picked.size || confirm(`清空已选的 ${picked.size} 条？`)) { picked.clear(); savePicked(); render(); }
+};
+document.getElementById('exportTxt').onclick = () => {
+  const rows = pickedRows();
+  if (!rows.length) return alert('还没有选中任何 session');
+  download('selected_sessions.txt', rows.map(s => s.id).join('\n') + '\n', 'text/plain');
+};
+document.getElementById('exportCsv').onclick = () => {
+  const rows = pickedRows();
+  if (!rows.length) return alert('还没有选中任何 session');
+  const head = 'session,dataset,status,frames,duration_s,residual_p50_mm,residual_p95_mm,rotation_deg,tracker_travel_m,flags';
+  const body = rows.map(s => [s.id, s.ds, s.st, s.fr ?? '', s.dur ?? '', s.p50 ?? '', s.p95 ?? '',
+                              s.rot ?? '', s.mov ?? '', '"' + flagsOf(s) + '"'].join(','));
+  download('selected_sessions.csv', [head, ...body].join('\n') + '\n', 'text/csv');
+};
+document.getElementById('copySel').onclick = async () => {
+  const rows = pickedRows();
+  if (!rows.length) return alert('还没有选中任何 session');
+  const text = rows.map(s => s.id).join('\n');
+  try { await navigator.clipboard.writeText(text); alert(`已复制 ${rows.length} 条 session 名`); }
+  catch (e) { download('selected_sessions.txt', text + '\n', 'text/plain'); }
+};
+document.getElementById('dsChips').addEventListener('click', event => {
+  const chip = event.target.closest('.chip');
+  if (!chip) return;
+  const ds = chip.dataset.ds;
+  active.has(ds) ? active.delete(ds) : active.add(ds);
+  chip.classList.toggle('on', active.has(ds));
+  render();
+});
+for (const id of ['q', 'status', 'sort', 'hand', 'trk', 'drift']) document.getElementById(id).addEventListener('input', render);
+savePicked();
+render();
+</script>
+</body>
+</html>

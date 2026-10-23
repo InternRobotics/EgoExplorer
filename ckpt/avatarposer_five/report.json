@@ -1,0 +1,20 @@
+{
+  "method": "AvatarPoser Transformer fine-tuned for five tracker SMPL-X",
+  "synthetic_sequences": 2444,
+  "hard_negative_sequences": 752,
+  "hard_negative_ratio": 0.3,
+  "hard_negative_angle_deg": 25.0,
+  "mount_noise_ratio": 0.0,
+  "mount_position_std": 0.018,
+  "mount_angle_std_deg": 8.0,
+  "natural_sequences": 52,
+  "windows": 710192,
+  "history": [
+    0.04906273153430507,
+    0.03249967249497322,
+    0.02807353960900792
+  ],
+  "source_checkpoint_sha256": "02f8888e807579771a7e9959160d1461b62b7112a1e99557aae76bedc46f9e76",
+  "mount_reference": null,
+  "warning": "natural labels are provisional; requires mocap/video validation"
+}
